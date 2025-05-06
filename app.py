@@ -4,21 +4,26 @@ import os
 import json
 from dotenv import load_dotenv
 from datetime import datetime
+from collections import Counter
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
 
+# Yüklemeler
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
-
-# API anahtarını oku
-genai.configure(api_key=os.getenv("API_KEY"))
+genai.configure(api_key=API_KEY)
 
 model = genai.GenerativeModel("gemini-2.0-flash")
 
-st.set_page_config(page_title="Bugün Ne Öğrendim?", page_icon="📘")
+st.set_page_config(page_title="BrainDrop", page_icon="🧠")
 
-st.title("📘 Bugün Ne Öğrendim?")
-st.markdown("Her gün öğrendiğin bir şeyi yaz, sana özetleyelim, etiketleyelim ve yorumlayalım!")
+st.title("🧠 BrainDrop")
+st.markdown("Her gün öğrendiğin bir bilgiyi bırak, biz senin için özetleyelim, etiketleyelim ve motive edelim!")
 
 user_input = st.text_area("Bugün ne öğrendin?")
+
+learning_goal = st.text_input("Bugün için öğrenme hedefiniz nedir? (Opsiyonel)")
+future_plan = st.text_area("Öğrendiklerini nasıl uygulayacağınızı planlıyorsunuz? (Opsiyonel)")
 
 if st.button("Gönder") and user_input.strip() != "":
     with st.spinner("Yapay zeka düşünürken biraz bekleyelim..."):
@@ -37,13 +42,11 @@ if st.button("Gönder") and user_input.strip() != "":
         """
         response = model.generate_content(prompt)
 
-    # Çıktıyı ayır
     lines = response.text.strip().split("\n")
     summary = next((l for l in lines if l.startswith("Özet:")), "Özet: Bulunamadı")
     topic = next((l for l in lines if l.startswith("Etiket:")), "Etiket: Bulunamadı")
     comment = next((l for l in lines if l.startswith("Yorum:")), "Yorum: Bulunamadı")
 
-    # Göster
     st.subheader("🎯 Özet")
     st.success(summary.replace("Özet:", "").strip())
 
@@ -53,38 +56,26 @@ if st.button("Gönder") and user_input.strip() != "":
     st.subheader("💬 Yorum")
     st.warning(comment.replace("Yorum:", "").strip())
 
-
     log = {
-        "tarih": datetime.now().isoformat(),
+        "tarih": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "girdi": user_input,
-        "ozet": response.text.split("Özet:")[1].split("Etiket:")[0].strip(),
-        "etiket": response.text.split("Etiket:")[1].split("Yorum:")[0].strip(),
-        "yorum": response.text.split("Yorum:")[1].strip()
-    }
-
-    with open("gunluk_kayitlar.json", "a", encoding="utf-8") as f:
-        f.write(json.dumps(log, ensure_ascii=False) + "\n")
-
-
-    log = {
-        "tarih": datetime.now().isoformat(),
-        "girdi": user_input,
-        "ozet": summary,
-        "etiket": topic,
-        "yorum": comment
+        "ozet": summary.replace("Özet:", "").strip(),
+        "etiket": topic.replace("Etiket:", "").strip(),
+        "yorum": comment.replace("Yorum:", "").strip(),
+        "ogrenme_hedefi": learning_goal.strip() if learning_goal else None,
+        "gelecek_planı": future_plan.strip() if future_plan else None
     }
 
     with open("gunlukler.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(log, ensure_ascii=False) + "\n")
 
 # -------------------------------------
-# 🔍 GEÇMİŞ GÜNLÜKLERİ GÖSTER
+# 📚 GEÇMİŞ GÜNLÜKLERİ GÖSTER
 # -------------------------------------
 
 st.markdown("---")
-st.subheader("📚 Geçmiş Günlükler")
+st.subheader("📚 Geçmiş Kayıtlar")
 
-# Günlük verilerini oku
 daily_logs = []
 if os.path.exists("gunlukler.jsonl"):
     with open("gunlukler.jsonl", "r", encoding="utf-8") as f:
@@ -94,24 +85,65 @@ if os.path.exists("gunlukler.jsonl"):
             except:
                 pass
 
-# Etiketleri topla (filtre için)
-etiketler = sorted(set(log.get("etiket", "Genel").replace("Etiket:", "").strip() for log in daily_logs if "etiket" in log))
+etiketler = sorted(set(log.get("etiket", "Genel") for log in daily_logs if "etiket" in log))
 selected_etiket = st.selectbox("Etikete göre filtrele:", ["Tümü"] + etiketler)
 
-# Filtrele
+filtered_logs = daily_logs
 if selected_etiket != "Tümü":
-    filtered_logs = [log for log in daily_logs if selected_etiket in log.get("etiket", "")]
-else:
-    filtered_logs = daily_logs
+    filtered_logs = [log for log in filtered_logs if selected_etiket in log.get("etiket", "")]
 
-# Göster
-for log in reversed(filtered_logs):  # Son girilenler üstte
+arama = st.text_input("Anahtar kelime ara:")
+if arama:
+    filtered_logs = [log for log in filtered_logs if arama.lower() in log.get("girdi", "").lower()]
+
+for log in reversed(filtered_logs):
+    tarih_str = log.get("tarih", "")
     st.markdown(f"""
-    **🗓️ Tarih:** {log.get("tarih", "")}  
-    **✍️ Girdi:** {log.get("girdi", "")}  
-    **🧠 Özet:** {log.get("ozet", "")}  
-    **🏷️ Etiket:** {log.get("etiket", "")}  
-    **💬 Yorum:** {log.get("yorum", "")}
-    ---
-    """)
+    <div style='border-left: 3px solid #ccc; padding-left: 15px; margin-bottom: 20px;'>
+        <strong>🗓️ {tarih_str}</strong><br>
+        <em>🏷️ {log.get("etiket", "")}</em><br>
+        <strong>🧠 Özet:</strong> {log.get("ozet", "")}<br>
+        <strong>✍️ Girdi:</strong> {log.get("girdi", "")}<br>
+        <small>💬 {log.get("yorum", "")}</small><br>
+        <strong>🎯 Hedef:</strong> {log.get("ogrenme_hedefi", "Belirtilmemiş")}<br>
+        <strong>📈 Plan:</strong> {log.get("gelecek_planı", "Belirtilmemiş")}
+    </div>
+    """, unsafe_allow_html=True)
 
+# -------------------------------------
+# 📊 İSTATİSTİKSEL GÖRSELLEŞTİRME
+# -------------------------------------
+
+st.markdown("---")
+st.subheader("📈 En Sık Öğrenilen Konular")
+
+etiket_sayilari = Counter(log.get("etiket", "Bilinmiyor") for log in daily_logs)
+if etiket_sayilari:
+    en_sik = etiket_sayilari.most_common(5)
+    etiketler, sayilar = zip(*en_sik)
+
+    fig, ax = plt.subplots()
+    ax.barh(etiketler, sayilar, color="skyblue")
+    ax.invert_yaxis()
+    ax.set_xlabel("Gün Sayısı")
+    ax.set_title("En Sık Öğrenilen Konular")
+    st.pyplot(fig)
+else:
+    st.info("Henüz istatistik gösterilecek kadar kayıt yok.")
+
+# -------------------------------------
+# ☁️ KELİME BULUTU
+# -------------------------------------
+
+st.markdown("---")
+st.subheader("☁️ Öğrenilen Bilgilerden Kelime Bulutu")
+
+tum_girdiler = " ".join(log.get("girdi", "") for log in daily_logs)
+if tum_girdiler.strip():
+    wordcloud = WordCloud(width=800, height=400, background_color="white").generate(tum_girdiler)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.imshow(wordcloud, interpolation="bilinear")
+    ax.axis("off")
+    st.pyplot(fig)
+else:
+    st.info("Kelime bulutu oluşturmak için yeterli veri yok.")
